@@ -44,6 +44,7 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from pymoveit2.utils import enum_to_str
 
+from scipy.spatial.transform import Rotation as R
 
 class MoveIt2State(Enum):
     """
@@ -236,7 +237,7 @@ class MoveIt2:
             ),
             callback_group=callback_group,
         )
-        self.__cartesian_path_request = GetCartesianPath.Request()
+        self._cartesian_path_request = GetCartesianPath.Request()
 
         # Create action client for trajectory execution
         self._execute_trajectory_action_client = ActionClient(
@@ -527,6 +528,11 @@ class MoveIt2:
         if future is None:
             return None
 
+        # # 100ms sleep
+        # rate = self._node.create_rate(10)
+        # while not future.done():
+        #     rate.sleep()
+        rclpy.spin_until_future_complete(self._node, future)
         # 100ms sleep
         rate = self._node.create_rate(10)
         while not future.done():
@@ -1996,43 +2002,43 @@ class MoveIt2:
         frame_id: Optional[str] = None,
     ) -> Optional[Future]:
         # Reuse request from move action goal
-        self.__cartesian_path_request.start_state = (
+        self._cartesian_path_request.start_state = (
             self.__move_action_goal.request.start_state
         )
 
         # The below attributes were introduced in Iron and do not exist in Humble.
-        if hasattr(self.__cartesian_path_request, "max_velocity_scaling_factor"):
-            self.__cartesian_path_request.max_velocity_scaling_factor = (
+        if hasattr(self._cartesian_path_request, "max_velocity_scaling_factor"):
+            self._cartesian_path_request.max_velocity_scaling_factor = (
                 self.__move_action_goal.request.max_velocity_scaling_factor
             )
-        if hasattr(self.__cartesian_path_request, "max_acceleration_scaling_factor"):
-            self.__cartesian_path_request.max_acceleration_scaling_factor = (
+        if hasattr(self._cartesian_path_request, "max_acceleration_scaling_factor"):
+            self._cartesian_path_request.max_acceleration_scaling_factor = (
                 self.__move_action_goal.request.max_acceleration_scaling_factor
             )
 
-        self.__cartesian_path_request.group_name = (
+        self._cartesian_path_request.group_name = (
             self.__move_action_goal.request.group_name
         )
-        self.__cartesian_path_request.link_name = self.__end_effector_name
-        self.__cartesian_path_request.max_step = max_step
+        self._cartesian_path_request.link_name = self.__end_effector_name
+        self._cartesian_path_request.max_step = max_step
 
-        self.__cartesian_path_request.header.frame_id = (
+        self._cartesian_path_request.header.frame_id = (
             frame_id if frame_id is not None else self.__base_link_name
         )
 
         stamp = self._node.get_clock().now().to_msg()
-        self.__cartesian_path_request.header.stamp = stamp
+        self._cartesian_path_request.header.stamp = stamp
 
-        self.__cartesian_path_request.path_constraints = (
+        self._cartesian_path_request.path_constraints = (
             self.__move_action_goal.request.path_constraints
         )
         for (
             position_constraint
-        ) in self.__cartesian_path_request.path_constraints.position_constraints:
+        ) in self._cartesian_path_request.path_constraints.position_constraints:
             position_constraint.header.stamp = stamp
         for (
             orientation_constraint
-        ) in self.__cartesian_path_request.path_constraints.orientation_constraints:
+        ) in self._cartesian_path_request.path_constraints.orientation_constraints:
             orientation_constraint.header.stamp = stamp
         # no header in joint_constraint message type
 
@@ -2049,6 +2055,8 @@ class MoveIt2:
             .orientation
         )
 
+        self._cartesian_path_request.waypoints = [target_pose]
+
         self.__cartesian_path_request.waypoints = [target_pose]
         self._plan_cartesian_path_service.wait_for_service(timeout_sec=3.0)
         if not self._plan_cartesian_path_service.service_is_ready():
@@ -2058,7 +2066,71 @@ class MoveIt2:
             return None
 
         return self._plan_cartesian_path_service.call_async(
-            self.__cartesian_path_request
+            self._cartesian_path_request
+        )
+        
+    def _plan_cartesian_path_waypoints(
+        self,
+        waypoints: np.ndarray, # array of N x 4 x 4 with N waypoints given by SE3 rotation matrices
+        max_step: float = 0.0025,
+        frame_id: Optional[str] = None,
+    ) -> Optional[Future]:
+        # Reuse request from move action goal
+        self._cartesian_path_request.start_state = (
+            self.__move_action_goal.request.start_state
+        )
+
+        # The below attributes were introduced in Iron and do not exist in Humble.
+        if hasattr(self._cartesian_path_request, "max_velocity_scaling_factor"):
+            self._cartesian_path_request.max_velocity_scaling_factor = (
+                self.__move_action_goal.request.max_velocity_scaling_factor
+            )
+        if hasattr(self._cartesian_path_request, "max_acceleration_scaling_factor"):
+            self._cartesian_path_request.max_acceleration_scaling_factor = (
+                self.__move_action_goal.request.max_acceleration_scaling_factor
+            )
+
+        self._cartesian_path_request.group_name = (
+            self.__move_action_goal.request.group_name
+        )
+        self._cartesian_path_request.link_name = self.__end_effector_name
+        self._cartesian_path_request.max_step = max_step
+
+        self._cartesian_path_request.header.frame_id = (
+            frame_id if frame_id is not None else self.__base_link_name
+        )
+
+        stamp = self._node.get_clock().now().to_msg()
+        self._cartesian_path_request.header.stamp = stamp
+
+        self._cartesian_path_request.path_constraints = (
+            self.__move_action_goal.request.path_constraints
+        )
+        for (
+            position_constraint
+        ) in self._cartesian_path_request.path_constraints.position_constraints:
+            position_constraint.header.stamp = stamp
+        for (
+            orientation_constraint
+        ) in self._cartesian_path_request.path_constraints.orientation_constraints:
+            orientation_constraint.header.stamp = stamp
+        # no header in joint_constraint message type
+
+        self._cartesian_path_request.waypoints = []
+        for waypoint in waypoints:
+            target_pose = Pose()
+            target_pose.position.x, target_pose.position.y, target_pose.position.z = waypoint[:3,3].astype(float)
+            target_pose.orientation.x, target_pose.orientation.y, target_pose.orientation.z, target_pose.orientation.w = R.from_matrix(waypoint[:3, :3]).as_quat().astype(float)
+            self._cartesian_path_request.waypoints.append(target_pose)
+            
+        if not self._plan_cartesian_path_service.service_is_ready():
+            self._node.get_logger().warn(
+                f"Service '{self._plan_cartesian_path_service.srv_name}' is not yet available. Better luck next time!"
+            )
+            return None
+
+        return self._plan_cartesian_path_service.call_async(
+            self._cartesian_path_request
         )
 
     def _send_goal_async_move_action(self):
@@ -2151,11 +2223,15 @@ class MoveIt2:
         self.__execution_mutex.acquire()
         goal_handle = response.result()
         if not goal_handle.accepted:
-            self._node.get_logger().warn(
+            self._node.get_logger().error(
                 f"Action '{self._execute_trajectory_action_client._action_name}' was rejected."
             )
             self.__is_motion_requested = False
             return
+        else:
+            self._node.get_logger().info(
+                f"Action '{self._execute_trajectory_action_client._action_name}' was accepted."
+            )
 
         self.__execution_goal_handle = goal_handle
         self.__is_executing = True
@@ -2178,6 +2254,9 @@ class MoveIt2:
             )
             self.motion_suceeded = False
         else:
+            self._node.get_logger().error(
+                f"Action '{self._execute_trajectory_action_client._action_name}' was successful: {res.result()}."
+            )
             self.motion_suceeded = True
 
         self.__last_error_code = res.result().result.error_code
@@ -2337,35 +2416,35 @@ class MoveIt2:
 
     @property
     def cartesian_avoid_collisions(self) -> bool:
-        return self.__cartesian_path_request.request.avoid_collisions
+        return self._cartesian_path_request.request.avoid_collisions
 
     @cartesian_avoid_collisions.setter
     def cartesian_avoid_collisions(self, value: bool):
-        self.__cartesian_path_request.avoid_collisions = value
+        self._cartesian_path_request.avoid_collisions = value
 
     @property
     def cartesian_jump_threshold(self) -> float:
-        return self.__cartesian_path_request.request.jump_threshold
+        return self._cartesian_path_request.request.jump_threshold
 
     @cartesian_jump_threshold.setter
     def cartesian_jump_threshold(self, value: float):
-        self.__cartesian_path_request.jump_threshold = value
+        self._cartesian_path_request.jump_threshold = value
 
     @property
     def cartesian_prismatic_jump_threshold(self) -> float:
-        return self.__cartesian_path_request.request.prismatic_jump_threshold
+        return self._cartesian_path_request.request.prismatic_jump_threshold
 
     @cartesian_prismatic_jump_threshold.setter
     def cartesian_prismatic_jump_threshold(self, value: float):
-        self.__cartesian_path_request.prismatic_jump_threshold = value
+        self._cartesian_path_request.prismatic_jump_threshold = value
 
     @property
     def cartesian_revolute_jump_threshold(self) -> float:
-        return self.__cartesian_path_request.request.revolute_jump_threshold
+        return self._cartesian_path_request.request.revolute_jump_threshold
 
     @cartesian_revolute_jump_threshold.setter
     def cartesian_revolute_jump_threshold(self, value: float):
-        self.__cartesian_path_request.revolute_jump_threshold = value
+        self._cartesian_path_request.revolute_jump_threshold = value
 
     @property
     def pipeline_id(self) -> int:

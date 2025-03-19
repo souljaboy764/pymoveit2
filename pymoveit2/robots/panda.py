@@ -1,9 +1,9 @@
 from typing import List
 
 MOVE_GROUP_ARM: str = "arm"
-MOVE_GROUP_GRIPPER: str = "gripper"
+MOVE_GROUP_GRIPPER: str = "hand"
 
-OPEN_GRIPPER_JOINT_POSITIONS: List[float] = [0.04, 0.04]
+OPEN_GRIPPER_JOINT_POSITIONS: List[float] = [0.0395, 0.0395]
 CLOSED_GRIPPER_JOINT_POSITIONS: List[float] = [0.0, 0.0]
 
 

@@ -37,9 +37,10 @@ def main():
         gripper_joint_names=robot.gripper_joint_names(),
         open_gripper_joint_positions=robot.OPEN_GRIPPER_JOINT_POSITIONS,
         closed_gripper_joint_positions=robot.CLOSED_GRIPPER_JOINT_POSITIONS,
-        gripper_group_name=robot.MOVE_GROUP_GRIPPER,
+        gripper_group_name='hand',
         callback_group=callback_group,
-        gripper_command_action_name="gripper_action_controller/gripper_cmd",
+        # gripper_command_action_name="/panda_gripper/gripper_action",
+        use_move_group_action=True
     )
 
     # Spin the node in background thread(s) and wait a bit for initialization
@@ -64,13 +65,9 @@ def main():
         gripper_interface.close()
         gripper_interface.wait_until_executed()
     else:
-        period_s = 1.0
-        rate = node.create_rate(1 / period_s)
-        while rclpy.ok():
-            gripper_interface()
-            gripper_interface.wait_until_executed()
-            rate.sleep()
-
+        gripper_interface.toggle()
+        gripper_interface.wait_until_executed()
+        
     rclpy.shutdown()
     executor_thread.join()
     exit(0)
